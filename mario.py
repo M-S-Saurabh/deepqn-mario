@@ -15,6 +15,7 @@ from nes_py.wrappers import JoypadSpace
 import numpy as np
 import torch
 from torch import nn
+from tqdm import tqdm
 import matplotlib.pyplot as plt
 
 
@@ -275,7 +276,7 @@ def run():
 
     max_reward = 0
     rewards = list()
-    for ep_num in range(config.number_of_episodes):
+    for ep_num in tqdm(range(config.number_of_episodes)):
         state = env.reset()
         state = torch.from_numpy(state).unsqueeze(0)
         episode_reward = 0
