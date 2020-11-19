@@ -21,8 +21,8 @@ class DQN(nn.Module):
         i1 = F.relu(self.c1(x))
         i2 = F.relu(self.c2(i1))
         i3 = F.relu(self.c3(i2))
-        intermediate = i3.reshape(self.batch_size, 1, -1)
-        # intermediate = i3.view(-1, 3136)
+        # intermediate = i3.reshape(self.batch_size, 1, -1)
+        intermediate = i3.view(-1, 3136)
         i4 = F.relu(self.h1(intermediate))
         i5 = self.h2(i4)
         return i5
