@@ -92,7 +92,7 @@ class MarioAgent:
         
         action, done, next_state, reward, state = self.memory.recall(self.device)
         self.optimizer.zero_grad()
-        target_actions = self.Q_target(next_state).max(1).indices.unsqueeze(1)
+        target_actions = self.Q_target(next_state).max(1).values.unsqueeze(1)
         target = reward + self.gamma*torch.mul(target_actions, 1 - done)
         current = self.Q(state).gather(1, action.long())
         loss = self.loss_func(current, target)
