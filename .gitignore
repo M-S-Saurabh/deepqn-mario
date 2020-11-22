@@ -1,2 +1,6 @@
 __pycache__
 *.pt
+*.pyc
+venv
+.idea
+*.pkl
