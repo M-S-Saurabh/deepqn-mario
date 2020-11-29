@@ -2,6 +2,7 @@ import random
 import pickle
 import torch
 from torch import nn
+import torchviz
 
 from networks import DQN
 

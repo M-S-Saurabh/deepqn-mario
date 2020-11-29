@@ -9,6 +9,7 @@ from tqdm import tqdm
 import pickle
 
 import torch
+import torchviz
 import gym_super_mario_bros
 
 # User libraries
@@ -104,3 +105,4 @@ def run():
 
 if __name__ == "__main__":
     run()
+
