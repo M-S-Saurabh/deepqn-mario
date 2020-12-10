@@ -11,17 +11,31 @@ class MaxAndSkipEnv(gym.Wrapper):
         gym.Wrapper.__init__(self, env)
         self._buffer = collections.deque(maxlen=skip)
         self._skip = skip
+        self.prev_x = None
+        self.prev_time = None
 
     def step(self, action):
         total_reward = 0.0
         done = None
         for _ in range(self._skip):
             obs, reward, done, info = self.env.step(action)
-            self._buffer.append(obs)
             total_reward += reward
+            self._buffer.append(obs)
             if done:
                 break
         max_frame = np.max(np.stack(self._buffer), axis=0)
+
+        total_reward = total_reward//4
+        x, time = info["x_pos"], info["time"]
+
+        if x == self.prev_x:
+            total_reward *= np.exp(-(self.prev_time - time))
+        else:
+            self.prev_x, self.prev_time = x, time
+
+        if reward == -15:
+            total_reward = -15
+
         return max_frame, total_reward, done, info
 
     def reset(self):
