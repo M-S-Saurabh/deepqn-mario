@@ -1,3 +1,4 @@
+import numpy as np
 import random
 import pickle
 import torch
@@ -31,7 +32,11 @@ class Memory:
         self.num_in_queue = min(self.num_in_queue+1, self.memory_size)
 
     def recall(self, device):
-        idx = random.choices(range(self.num_in_queue), k=self.memory_sample_size)
+        rewards = self.rewards[:self.num_in_queue] - torch.min(self.rewards) # enforce r >= 0
+        s = torch.sum(rewards)
+        p = (rewards[:self.num_in_queue]/s).reshape(-1).numpy() if s > 0 else None
+        replace = s == 0 or len([x for x in p if x > 0]) < self.memory_sample_size
+        idx = np.random.choice(self.num_in_queue, self.memory_sample_size, replace=replace, p=p)
 
         action = self.actions[idx].to(device)
         done = self.dones[idx].to(device)
