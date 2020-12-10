@@ -66,6 +66,8 @@ class MarioAgent:
         if double_dqn is not None:
             self.Q_target = double_dqn.to(device)
             self.copy_step = copy_step
+        else:
+            self.Q_target = None
         self.step = 0
         self.device = device
         self.exploration_decay = exploration_decay
@@ -73,9 +75,16 @@ class MarioAgent:
         self.exploration_min = exploration_min
         self.exploration_rate = exploration_max
         self.gamma = gamma
+        self.iterative_loss_threshold = iterative_loss_threshold
         self.loss_func = nn.SmoothL1Loss().to(self.device)#nn.MSELoss()
         self.memory = memory
         self.optimizer = torch.optim.Adam(self.Q.parameters(), lr=lr)
+        self.plotter = plotter
+
+    def eval(self):
+        self.Q.eval()
+        if self.Q_target is not None:
+            self.Q_target.eval()
 
     def act(self, state):
         if random.random() < self.exploration_rate:
@@ -107,6 +116,7 @@ class MarioAgent:
 
     def copy(self):
         self.Q_target.load_state_dict(self.Q.state_dict())
+        self.Q_target.eval()
 
     def save(self):
         torch.save(self.Q.state_dict(), "Q.pt")
