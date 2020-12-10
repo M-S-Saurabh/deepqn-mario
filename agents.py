@@ -3,7 +3,7 @@ import random
 import pickle
 import torch
 from torch import nn
-import torchviz
+from plot_utils import VisdomLinePlotter
 
 from networks import DQN
 
@@ -60,7 +60,10 @@ class Memory:
         
 
 class MarioAgent:
-    def __init__(self, dqn, gamma, lr, exploration_max, exploration_min, exploration_decay, memory, device="cpu", double_dqn=None, copy_step=None):
+    def __init__(self, dqn, gamma, lr, exploration_max, exploration_min,
+                 exploration_decay, iterative_loss_threshold,
+                 memory, device="cpu", double_dqn=None,
+                 copy_step=None, plotter=None):
         self.Q = dqn
         self.Q.to(device)
         if double_dqn is not None:
@@ -104,14 +107,25 @@ class MarioAgent:
         _done = torch.tensor(1.0 if _done else 0)
         _next_state = torch.from_numpy(_next_state).unsqueeze(0)
         self.memory.remember(_action, _done, _next_state, _reward, _state)
-        
-        action, done, next_state, reward, state = self.memory.recall(self.device)
-        self.optimizer.zero_grad()
-        target_actions = self.Q_target(next_state).max(1).values.unsqueeze(1)
-        target = reward + self.gamma*torch.mul(target_actions, 1 - done)
-        current = self.Q(state).gather(1, action.long())
-        loss = self.loss_func(current, target)
-        loss.backward()
+
+        prev_loss = 0
+        loss_diff = 1
+        while loss_diff > self.iterative_loss_threshold:
+            action, done, next_state, reward, state = self.memory.recall(self.device)
+            self.optimizer.zero_grad()
+            target_actions = self.Q_target(next_state).max(1).values.unsqueeze(1)
+            target = reward + self.gamma*torch.mul(target_actions, 1 - done)
+            current = self.Q(state).gather(1, action.long())
+            loss = self.loss_func(current, target)
+            loss.backward()
+            loss_diff = abs(prev_loss - loss.item())
+            prev_loss = loss.item()
+        if self.plotter:
+            self.plotter.plot(var_name="loss", split_name="q_update",
+                              title_name="Update Loss",
+                              x=self.step, y=loss.item())
+        for param in self.Q.parameters():
+            param.grad.data.clamp_(-1, 1) # https://stackoverflow.com/a/58752096/4646773
         self.optimizer.step()
 
     def copy(self):
