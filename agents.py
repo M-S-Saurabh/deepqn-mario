@@ -63,7 +63,7 @@ class MarioAgent:
     def __init__(self, dqn, gamma, lr, exploration_max, exploration_min,
                  exploration_decay, iterative_loss_threshold,
                  memory, device="cpu", double_dqn=None,
-                 copy_step=None, plotter=None):
+                 copy_step=None, split_name="", plotter=None):
         self.Q = dqn
         self.Q.to(device)
         if double_dqn is not None:
@@ -82,6 +82,7 @@ class MarioAgent:
         self.loss_func = nn.SmoothL1Loss().to(self.device)#nn.MSELoss()
         self.memory = memory
         self.optimizer = torch.optim.Adam(self.Q.parameters(), lr=lr)
+        self.split_name = split_name
         self.plotter = plotter
 
     def eval(self):
@@ -121,7 +122,7 @@ class MarioAgent:
             loss_diff = abs(prev_loss - loss.item())
             prev_loss = loss.item()
         if self.plotter:
-            self.plotter.plot(var_name="loss", split_name="q_update",
+            self.plotter.plot(var_name="loss", split_name=self.split_name,
                               title_name="Update Loss",
                               x=self.step, y=loss.item())
         for param in self.Q.parameters():

@@ -30,7 +30,7 @@ class Config:
     exploration_min = attr.ib(0.08)
     gamma = attr.ib(0.90)
     is_training = attr.ib(True)
-    iterative_loss_threshold = attr.ib(5e-2)
+    iterative_loss_threshold = attr.ib(.1)
     learning_rate = attr.ib(1e-4)
     memory_size = attr.ib(30000)
     number_of_episodes = attr.ib(5000)
@@ -50,6 +50,7 @@ def run():
     else:
         memory = None
 
+    split_name = "train" if config.is_training else "test"
     agent = MarioAgent(dqn,
                        double_dqn = dqn_target,
                        copy_step=config.copy_step,
@@ -61,9 +62,9 @@ def run():
                        iterative_loss_threshold=config.iterative_loss_threshold,
                        memory=memory,
                        device=config.device,
+                       split_name=split_name,
                        plotter=plotter)
 
-    max_reward = 0
     rewards = list()
     do_load = config.do_load_model or not config.is_training
     if do_load:
@@ -97,7 +98,7 @@ def run():
                 wins += 1
         print(f"{episode_reward}")
         if plotter:
-            plotter.plot(var_name="reward", split_name="train",
+            plotter.plot(var_name="reward", split_name=split_name,
                          title_name="Episode Reward",
                          x=episode, y=episode_reward)
 
@@ -110,6 +111,10 @@ def run():
 
         if episode%100 == 0:
             print(f"win rate: {wins}%")
+            if plotter:
+                plotter.plot(var_name="wins", split_name=split_name,
+                             title_name="Win rate (per 100 episodes)",
+                             x=episode, y=wins)
             wins = 0
     if config.is_training:
         agent.save()
