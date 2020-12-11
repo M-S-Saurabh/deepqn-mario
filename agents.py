@@ -61,9 +61,8 @@ class Memory:
 
 class MarioAgent:
     def __init__(self, dqn, gamma, lr, exploration_max, exploration_min,
-                 exploration_decay, iterative_loss_threshold,
-                 memory, device="cpu", double_dqn=None,
-                 copy_step=None, split_name="", plotter=None):
+                 exploration_decay, memory, device="cpu", double_dqn=None,
+                 copy_step=None, iterative_loss_threshold=1):
         self.Q = dqn
         self.Q.to(device)
         if double_dqn is not None:
@@ -78,12 +77,10 @@ class MarioAgent:
         self.exploration_min = exploration_min
         self.exploration_rate = exploration_max
         self.gamma = gamma
-        self.iterative_loss_threshold = iterative_loss_threshold
         self.loss_func = nn.SmoothL1Loss().to(self.device)#nn.MSELoss()
         self.memory = memory
         self.optimizer = torch.optim.Adam(self.Q.parameters(), lr=lr)
-        self.split_name = split_name
-        self.plotter = plotter
+        self.iterative_loss_threshold = iterative_loss_threshold
 
     def eval(self):
         self.Q.eval()
@@ -101,7 +98,8 @@ class MarioAgent:
         return action
 
     def q_update(self, _state, _action, _reward, _next_state, _done):
-        if self.step % self.copy_step == 0:
+        has_copy_step = self.step % self.copy_step == 0
+        if has_copy_step:
             self.copy()
         _action = torch.tensor(_action)
         _reward = torch.tensor(_reward)
@@ -119,15 +117,11 @@ class MarioAgent:
             current = self.Q(state).gather(1, action.long())
             loss = self.loss_func(current, target)
             loss.backward()
+            nn.utils.clip_grad.clip_grad_norm_(self.Q.parameters(), 10)
+            self.optimizer.step()
             loss_diff = abs(prev_loss - loss.item())
             prev_loss = loss.item()
-        if self.plotter:
-            self.plotter.plot(var_name="loss", split_name=self.split_name,
-                              title_name="Update Loss",
-                              x=self.step, y=loss.item())
-        for param in self.Q.parameters():
-            param.grad.data.clamp_(-1, 1) # https://stackoverflow.com/a/58752096/4646773
-        self.optimizer.step()
+        return loss.item(), has_copy_step
 
     def copy(self):
         self.Q_target.load_state_dict(self.Q.state_dict())
