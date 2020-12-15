@@ -1,12 +1,12 @@
 import matplotlib.pyplot as plt
 import pickle
 
-def save_rewards(rewards):
-    with open('rewards_list.pkl', 'wb+') as temp:
+def save_rewards(rewards, filename='rewards_list.pkl'):
+    with open(filename, 'wb+') as temp:
         pickle.dump(rewards, temp)
 
-def load_rewards():
-    with open('rewards_list.pkl', 'rb') as temp:
+def load_rewards(filename='rewards_list.pkl'):
+    with open(filename, 'rb') as temp:
         rewards = pickle.load(temp)
     return rewards
 

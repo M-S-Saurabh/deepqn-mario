@@ -15,7 +15,7 @@ import gym_super_mario_bros
 # User libraries
 from wrappers import make_env
 from networks import DQN
-from agents import Memory, MarioAgent
+from agents import Memory, DQNAgent
 from rewards import plot_rewards, save_rewards, load_rewards
 
 @attr.s
@@ -47,7 +47,7 @@ def run():
     else:
         memory = None
 
-    agent = MarioAgent(dqn,
+    agent = DQNAgent(dqn,
                        double_dqn = dqn_target,
                        copy_step=config.copy_step,
                        gamma=config.gamma,
@@ -102,7 +102,49 @@ def run():
         save_rewards(rewards)
         plot_rewards(rewards)
 
+from networks import ActorCriticNet
+from agents import ActorCriticAgent
+
+def runAC(savepath='./saved_models/'):
+    config = Config()
+    env = gym_super_mario_bros.make("SuperMarioBros-1-1-v0")
+    env = make_env(env)
+
+    max_episodes = 5000
+    max_steps_per_episode = 1000
+    gamma = 0.99
+
+    state_shape = env.observation_space.shape
+    output_size = env.action_space.n
+    model = ActorCriticNet(state_shape[0], config.batch_size, output_size)
+    agent = ActorCriticAgent(model, config.learning_rate, gamma=gamma, max_steps=max_steps_per_episode, device=config.device)
+
+    running_reward = 0
+    running_rewards = []
+    episode_rewards = []
+    with tqdm(range(max_episodes)) as t:
+        for i in t:
+            initial_state = env.reset()
+            episode_reward = int(agent.train_step(env, model, initial_state))
+
+            running_reward = episode_reward*0.01 + running_reward*.99
+
+            running_rewards.append(running_reward)
+            episode_rewards.append(episode_reward)
+
+            t.set_description(f'Episode {i}')
+            t.set_postfix(episode_reward=episode_reward, running_reward=running_reward)
+
+            # Show average episode reward every 10 episodes
+            # if i % 10 == 0:
+            #     print(f'Episode {i}: reward: {running_reward}')
+            
+            if i % 500 == 0:
+                agent.save(savepath)
+                save_rewards(running_rewards, 'running_rewards.pkl')
+                save_rewards(episode_rewards, 'episode_rewards.pkl')
+
 
 if __name__ == "__main__":
-    run()
+    runAC(savepath='./saved_models/actor_critic_test/')
 

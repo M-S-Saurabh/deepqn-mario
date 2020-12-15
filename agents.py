@@ -53,8 +53,7 @@ class Memory:
             for k,v in vars.items():
                 setattr(self, k, v)
         
-
-class MarioAgent:
+class DQNAgent:
     def __init__(self, dqn, gamma, lr, exploration_max, exploration_min, exploration_decay, memory, device="cpu", double_dqn=None, copy_step=None):
         self.Q = dqn
         self.Q.to(device)
@@ -116,3 +115,90 @@ class MarioAgent:
         r = min(r, self.exploration_max)
         r = max(r, self.exploration_min)
         self.exploration_rate = r
+
+
+from torch.distributions.categorical import Categorical
+import torch.nn.functional as F
+from networks import ActorCriticNet
+
+class ActorCriticAgent:
+    def __init__(self, nn_model, learning_rate, gamma=0.9, beta=0.01, max_steps=5000, device='cpu'):
+        super().__init__()
+        self.model = nn_model
+        self.model.to(device)
+        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=learning_rate)
+        self.max_steps = max_steps
+        self.gamma = gamma
+        self.beta = beta
+        self.device = device
+        
+    def run_episode(self, env, nn_model, initial_state):
+        state = initial_state
+        log_prob_list = []
+        value_list = []
+        entropy_list = []
+        reward_list = []
+        for i in range(self.max_steps):
+            # Run model and get action probs and critic values
+            state = torch.from_numpy(state).unsqueeze(0).to(self.device)
+            action_logits, value = nn_model(state)
+            action_probs = F.softmax(action_logits, dim=1)
+            log_probs = F.log_softmax(action_logits, dim=1)
+
+            # Sample an action with these probs
+            action = Categorical(action_probs).sample().item()
+
+            # Run step with this action
+            state, reward, done, _ = env.step(action)
+
+            value_list.append(value)
+            log_prob_list.append(log_probs[0, action])
+            reward_list.append(reward)
+
+            # Calculate entropy
+            entropy_list.append( -(action_probs * log_probs).sum(1, keepdim=True) )
+
+            if done: break
+        return log_prob_list, value_list, reward_list, entropy_list
+
+    def compute_loss(self, log_prob_list, value_list, reward_list, entropy_list):
+        R = torch.zeros((1, 1), dtype=torch.float).to(self.device)
+        # if not done:
+        #     _, R, _, _ = local_model(state)
+
+        gae = torch.zeros((1, 1), dtype=torch.float).to(self.device)
+        actor_loss = 0
+        critic_loss = 0
+        entropy_loss = 0
+        next_value = R
+
+        for value, log_policy, reward, entropy in list(zip(value_list, log_prob_list, reward_list, entropy_list))[::-1]:
+            gae = gae * self.gamma
+            gae = gae + reward + self.gamma * next_value.detach() - value.detach()
+            next_value = value
+            actor_loss = actor_loss + log_policy * gae
+            R = R * self.gamma + reward
+            critic_loss = critic_loss + (R - value) ** 2 / 2
+            entropy_loss = entropy_loss + entropy
+
+        total_loss = -actor_loss + critic_loss - self.beta * entropy_loss
+        return total_loss
+
+    def train_step(self, env, model, initial_state):
+        # Run a full episode
+        log_prob_list, value_list, reward_list, entropy_list = self.run_episode(env, model, initial_state)
+
+        # Compute loss
+        total_loss = self.compute_loss(log_prob_list, value_list, reward_list, entropy_list)
+
+        self.optimizer.zero_grad()
+        total_loss.backward()
+        self.optimizer.step()
+
+        return sum(reward_list)
+
+    def save(self, path):
+        torch.save(self.model.state_dict(), path+"model.pt")
+
+    def load(self, path):
+        self.model.load_state_dict(torch.load(path+"model.pt"))
