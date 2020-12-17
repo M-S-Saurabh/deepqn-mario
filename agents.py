@@ -118,84 +118,95 @@ class DQNAgent:
 
 
 from torch.distributions.categorical import Categorical
-import torch.nn.functional as F
+import numpy as np
 from networks import ActorCriticNet
 
 class ActorCriticAgent:
-    def __init__(self, nn_model, learning_rate, gamma=0.9, beta=0.01, max_steps=5000, device='cpu'):
+    def __init__(self, nn_model, learning_rate, gamma=0.9, max_steps=5000, device='cpu'):
         super().__init__()
         self.model = nn_model
         self.model.to(device)
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=learning_rate)
         self.max_steps = max_steps
         self.gamma = gamma
-        self.beta = beta
         self.device = device
-        
-    def run_episode(self, env, nn_model, initial_state):
-        state = initial_state
-        log_prob_list = []
-        value_list = []
-        entropy_list = []
-        reward_list = []
-        for i in range(self.max_steps):
-            # Run model and get action probs and critic values
-            state = torch.from_numpy(state).unsqueeze(0).to(self.device)
-            action_logits, value = nn_model(state)
-            action_probs = F.softmax(action_logits, dim=1)
-            log_probs = F.log_softmax(action_logits, dim=1)
+        self.entropy_term = 0
 
-            # Sample an action with these probs
-            action = Categorical(action_probs).sample().item()
-
-            # Run step with this action
-            state, reward, done, _ = env.step(action)
-
-            value_list.append(value)
-            log_prob_list.append(log_probs[0, action])
-            reward_list.append(reward)
-
-            # Calculate entropy
-            entropy_list.append( -(action_probs * log_probs).sum(1, keepdim=True) )
-
-            if done: break
-        return log_prob_list, value_list, reward_list, entropy_list
-
-    def compute_loss(self, log_prob_list, value_list, reward_list, entropy_list):
-        R = torch.zeros((1, 1), dtype=torch.float).to(self.device)
-        # if not done:
-        #     _, R, _, _ = local_model(state)
-
-        gae = torch.zeros((1, 1), dtype=torch.float).to(self.device)
-        actor_loss = 0
-        critic_loss = 0
-        entropy_loss = 0
-        next_value = R
-
-        for value, log_policy, reward, entropy in list(zip(value_list, log_prob_list, reward_list, entropy_list))[::-1]:
-            gae = gae * self.gamma
-            gae = gae + reward + self.gamma * next_value.detach() - value.detach()
-            next_value = value
-            actor_loss = actor_loss + log_policy * gae
-            R = R * self.gamma + reward
-            critic_loss = critic_loss + (R - value) ** 2 / 2
-            entropy_loss = entropy_loss + entropy
-
-        total_loss = -actor_loss + critic_loss - self.beta * entropy_loss
-        return total_loss
-
-    def train_step(self, env, model, initial_state):
+    def train_step(self, env):
         # Run a full episode
-        log_prob_list, value_list, reward_list, entropy_list = self.run_episode(env, model, initial_state)
+        log_probs, values, rewards, last_Qval, num_steps = self.run_episode(env)
 
         # Compute loss
-        total_loss = self.compute_loss(log_prob_list, value_list, reward_list, entropy_list)
+        total_loss = self.compute_loss(log_probs, values, rewards, last_Qval)
 
+        # Back-propagate
         self.optimizer.zero_grad()
         total_loss.backward()
         self.optimizer.step()
 
-        return sum(reward_list)
+        return sum(rewards), num_steps
+
+    def run_episode(self, env):
+        log_probs = []
+        values = []
+        rewards = []
+
+        state = env.reset()
+        for step in range(self.max_steps):
+            # Run model and get action probs and critic values
+            state = torch.from_numpy(state).unsqueeze(0).to(self.device)
+            value, policy_dist = self.model.forward(state)
+            value = value.detach().cpu().numpy()[0,0]
+            dist = policy_dist.detach().cpu().numpy()
+            state = state.cpu()
+
+            # Sample an action with these probs
+            num_actions = dist.size
+            action = np.random.choice(num_actions, p=np.squeeze(dist))
+
+            log_prob = torch.log(policy_dist.squeeze(0)[action])
+            entropy = - np.sum(np.mean(dist) * np.log(dist + 1e-10))
+
+            # Run step with this action
+            state, reward, done, _ = env.step(action)
+
+            values.append(value)
+            log_probs.append(log_prob)
+            rewards.append(reward)
+            self.entropy_term += entropy
+
+            if done or step == self.max_steps-1:
+                state = torch.from_numpy(state).unsqueeze(0).to(self.device)
+                Qval, _ = self.model.forward(state)
+                Qval = Qval.detach().cpu().numpy()[0,0]
+                break
+
+        return log_probs, values, rewards, Qval, step
+
+    def compute_loss(self, log_probs, values, rewards, Q_val):
+        Q_vals = np.zeros_like(values)
+        for t in reversed(range(len(rewards))):
+            Q_val = rewards[t] + self.gamma * Q_val
+            Q_vals[t] = Q_val
+
+        values = torch.FloatTensor(values).to(self.device)
+        Q_vals = torch.FloatTensor(Q_vals).to(self.device)
+        log_probs = torch.stack(log_probs)
+
+        advantage = Q_vals - values
+
+        actor_loss = - (log_probs * advantage).mean()
+        critic_loss = 0.5 * advantage.pow(2).mean()
+
+        total_loss = actor_loss + critic_loss + 0.001 * self.entropy_term
+        return total_loss
+
+    def act(self, state):
+        state = torch.from_numpy(state).unsqueeze(0).to(self.device)
+        value, action_probs = self.model(state)
+        # Sample an action with these probs
+        action = Categorical(action_probs).sample().item()
+        return action
 
     def save(self, path):
         torch.save(self.model.state_dict(), path+"model.pt")

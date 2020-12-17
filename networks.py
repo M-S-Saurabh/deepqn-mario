@@ -39,9 +39,9 @@ class ActorCriticNet(nn.Module):
         self.c2 = nn.Conv2d(32, 64, kernel_size=4, stride=2)
         # 64 x 9 x 9
         self.c3 = nn.Conv2d(64, 64, kernel_size=3, stride=1)
+
         # 64 x 7 x 7 = 3136
         self.h1 = nn.Linear(3136, 512)
-
         self.actor = nn.Linear(512, output_size)
         self.critic = nn.Linear(512, 1)
 
@@ -49,7 +49,10 @@ class ActorCriticNet(nn.Module):
         i1 = F.relu(self.c1(x))
         i2 = F.relu(self.c2(i1))
         i3 = F.relu(self.c3(i2))
-        # intermediate = i3.reshape(self.batch_size, 1, -1)
         intermediate = i3.view(-1, 3136)
         i4 = F.relu(self.h1(intermediate))
-        return self.actor(i4), self.critic(i4)
+
+        value = self.critic(i4)
+        policy_dist = F.softmax(self.actor(i4), dim=1)
+
+        return value, policy_dist

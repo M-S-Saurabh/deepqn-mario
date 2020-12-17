@@ -117,34 +117,66 @@ def runAC(savepath='./saved_models/'):
     state_shape = env.observation_space.shape
     output_size = env.action_space.n
     model = ActorCriticNet(state_shape[0], config.batch_size, output_size)
-    agent = ActorCriticAgent(model, config.learning_rate, gamma=gamma, max_steps=max_steps_per_episode, device=config.device)
+    agent = ActorCriticAgent(model, 0.001, gamma=gamma, max_steps=max_steps_per_episode, device=config.device)
 
     running_reward = 0
     running_rewards = []
     episode_rewards = []
+    episode_lengths = []
     with tqdm(range(max_episodes)) as t:
         for i in t:
-            initial_state = env.reset()
-            episode_reward = int(agent.train_step(env, model, initial_state))
+            episode_reward, episode_length = agent.train_step(env)
+            episode_reward = int(episode_reward)
 
             running_reward = episode_reward*0.01 + running_reward*.99
 
             running_rewards.append(running_reward)
             episode_rewards.append(episode_reward)
+            episode_lengths.append(episode_length)
 
             t.set_description(f'Episode {i}')
             t.set_postfix(episode_reward=episode_reward, running_reward=running_reward)
-
-            # Show average episode reward every 10 episodes
-            # if i % 10 == 0:
-            #     print(f'Episode {i}: reward: {running_reward}')
             
             if i % 500 == 0:
                 agent.save(savepath)
                 save_rewards(running_rewards, 'running_rewards.pkl')
                 save_rewards(episode_rewards, 'episode_rewards.pkl')
+                save_rewards(episode_length, 'episode_lengths.pkl')
+
+def testAC(loadpath='./saved_models/'):
+    config = Config()
+    env = gym_super_mario_bros.make("SuperMarioBros-1-1-v0")
+    env = make_env(env)
+
+    max_episodes = 5000
+
+    state_shape = env.observation_space.shape
+    output_size = env.action_space.n
+    model = ActorCriticNet(state_shape[0], config.batch_size, output_size)
+    agent = ActorCriticAgent(model, config.learning_rate, device=config.device)
+
+    max_reward = 0
+    running_rewards = []
+    episode_rewards = []
+    with tqdm(range(max_episodes)) as t:
+        for i in t:
+            state = env.reset()
+            done = False
+            episode_reward = 0
+            while not done:
+                env.render()
+                action = agent.act(state)
+                state, reward, done, info = env.step(action)
+                episode_reward += reward
+                if done:
+                    break
+            if episode_reward > max_reward:
+                max_reward = episode_reward
+    print("Max reward is:", max_reward)
+    plot_rewards(episode_rewards, 'a2c_test_rewards.png')
+    return
 
 
 if __name__ == "__main__":
     runAC(savepath='./saved_models/actor_critic_test/')
-
+    # testAC(loadpath='./saved_models/actor_critic_test/')
