@@ -35,12 +35,12 @@ class ProcessFrames84(gym.ObservationWrapper):
     def __init__(self, env, image_size=(84, 84)):
         gym.ObservationWrapper.__init__(self, env)
         self.image_size = image_size
-        self.observation_space = gym.spaces.Box(
-            low=0,
-            high=255,
-            shape=(self.image_size[0], self.image_size[1], 1),
-            dtype=np.uint8
-        )
+        # self.observation_space = gym.spaces.Box(
+        #     low=0,
+        #     high=255,
+        #     shape=(self.image_size[0], self.image_size[1], 1),
+        #     dtype=np.uint8
+        # )
 
     def observation(self, frame):
         frame = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)

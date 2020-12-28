@@ -122,83 +122,90 @@ import numpy as np
 from networks import ActorCriticNet
 
 class ActorCriticAgent:
-    def __init__(self, nn_model, learning_rate, gamma=0.9, max_steps=5000, device='cpu'):
+    def __init__(self, nn_model, lr=1e-4, gamma=0.9, beta=0.01, max_steps=5000, device='cpu'):
         super().__init__()
         self.model = nn_model
         self.model.to(device)
-        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=learning_rate)
+        self.learning_rate = lr
+        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=lr)
         self.max_steps = max_steps
         self.gamma = gamma
+        self.beta = beta
         self.device = device
-        self.entropy_term = 0
+        self.max_grad_norm = 0.5
 
     def train_step(self, env):
         # Run a full episode
-        log_probs, values, rewards, last_Qval, num_steps = self.run_episode(env)
+        states, actions, log_probs, values, rewards, last_Qval, num_steps = self.run_episode(env)
 
         # Compute loss
-        total_loss = self.compute_loss(log_probs, values, rewards, last_Qval)
+        total_loss = self.compute_loss(states, actions, log_probs, values, rewards, last_Qval)
 
         # Back-propagate
         self.optimizer.zero_grad()
         total_loss.backward()
+        nn.utils.clip_grad_norm_(self.model.parameters(),
+                                     self.max_grad_norm)
         self.optimizer.step()
 
         return sum(rewards), num_steps
 
-    def run_episode(self, env):
+    def run_episode(self, env, render=False):
         log_probs = []
         values = []
         rewards = []
-
+        actions = []
+        states = []
+    
         state = env.reset()
         for step in range(self.max_steps):
-            # Run model and get action probs and critic values
-            state = torch.from_numpy(state).unsqueeze(0).to(self.device)
-            value, policy_dist = self.model.forward(state)
-            value = value.detach().cpu().numpy()[0,0]
-            dist = policy_dist.detach().cpu().numpy()
-            state = state.cpu()
-
-            # Sample an action with these probs
-            num_actions = dist.size
-            action = np.random.choice(num_actions, p=np.squeeze(dist))
-
-            log_prob = torch.log(policy_dist.squeeze(0)[action])
-            entropy = - np.sum(np.mean(dist) * np.log(dist + 1e-10))
+            if render:
+                env.render()
+            with torch.no_grad():
+                # Run model and get action probs and critic values
+                state = torch.from_numpy(state).unsqueeze(0).to(self.device)
+                value, action, log_prob = self.model.act(state)
+                state = state.cpu()
 
             # Run step with this action
-            state, reward, done, _ = env.step(action)
+            state, reward, done, _ = env.step(action.item())
+            old_state = state
 
-            values.append(value)
+            states.append(state)
+            actions.append(action)
             log_probs.append(log_prob)
+            values.append(value)
             rewards.append(reward)
-            self.entropy_term += entropy
 
             if done or step == self.max_steps-1:
                 state = torch.from_numpy(state).unsqueeze(0).to(self.device)
-                Qval, _ = self.model.forward(state)
+                Qval = self.model.get_value(state)
                 Qval = Qval.detach().cpu().numpy()[0,0]
                 break
 
-        return log_probs, values, rewards, Qval, step
+        return states, actions, log_probs, values, rewards, Qval, step
 
-    def compute_loss(self, log_probs, values, rewards, Q_val):
-        Q_vals = np.zeros_like(values)
+    def compute_loss(self, states, actions, log_probs, values, rewards, Q_val):
+        Q_vals = np.zeros_like(rewards)
         for t in reversed(range(len(rewards))):
+            # INclude GAE here.
+            # print("t:",t, "len(Q_vals):", Q_vals.shape, "len(rewards):", len(rewards))
             Q_val = rewards[t] + self.gamma * Q_val
             Q_vals[t] = Q_val
 
-        values = torch.FloatTensor(values).to(self.device)
+        states = torch.stack([ torch.from_numpy(state) for state in states]).to(self.device)
+        values, log_probs, dist_entropy = self.model.evaluate_actions(states, actions)
+
+        values = values.to(self.device)
         Q_vals = torch.FloatTensor(Q_vals).to(self.device)
-        log_probs = torch.stack(log_probs)
+        log_probs = log_probs.to(self.device)
 
         advantage = Q_vals - values
 
-        actor_loss = - (log_probs * advantage).mean()
+        actor_loss = - (log_probs * advantage.detach()).mean()
         critic_loss = 0.5 * advantage.pow(2).mean()
 
-        total_loss = actor_loss + critic_loss + 0.001 * self.entropy_term
+        total_loss = actor_loss + critic_loss - self.beta * dist_entropy
         return total_loss
 
     def act(self, state):
@@ -210,6 +217,18 @@ class ActorCriticAgent:
 
     def save(self, path):
         torch.save(self.model.state_dict(), path+"model.pt")
+        save_dict = {
+            'learning_rate': self.learning_rate,
+            'gamma': self.gamma,
+            'max_steps': self.max_steps,
+            'device': self.device
+        }
+        with open(path+"model.pkl", 'wb+') as paramfile:
+            pickle.dump(save_dict, paramfile)
 
     def load(self, path):
         self.model.load_state_dict(torch.load(path+"model.pt"))
+        with open(path+"model.pkl", 'rb') as paramfile:
+            load_dict = pickle.load(paramfile)
+            for k, v in load_dict.items():
+                self.k = v

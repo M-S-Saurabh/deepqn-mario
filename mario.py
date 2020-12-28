@@ -7,6 +7,7 @@ import random
 import attr
 from tqdm import tqdm
 import pickle
+import os
 
 import torch
 import torchviz
@@ -105,24 +106,41 @@ def run():
 from networks import ActorCriticNet
 from agents import ActorCriticAgent
 
-def runAC(savepath='./saved_models/'):
+def runAC(loadpath=None, savepath='./saved_models/', params=None):
     config = Config()
     env = gym_super_mario_bros.make("SuperMarioBros-1-1-v0")
     env = make_env(env)
 
     max_episodes = 5000
     max_steps_per_episode = 1000
-    gamma = 0.99
+
+    if params is None:
+        lr = 1e-4
+        gamma = 0.99
+        beta = 0.01
+    else:
+        lr = params['lr']
+        gamma = params['gamma']
+        beta = params['beta']
 
     state_shape = env.observation_space.shape
     output_size = env.action_space.n
-    model = ActorCriticNet(state_shape[0], config.batch_size, output_size)
-    agent = ActorCriticAgent(model, 0.001, gamma=gamma, max_steps=max_steps_per_episode, device=config.device)
+    model = ActorCriticNet(state_shape[0], output_size)
+    agent = ActorCriticAgent(model, lr=lr, gamma=gamma, beta=beta,
+                    max_steps=max_steps_per_episode, device=config.device)
 
-    running_reward = 0
-    running_rewards = []
-    episode_rewards = []
-    episode_lengths = []
+    if loadpath is None:
+        running_reward = 0
+        running_rewards = []
+        episode_rewards = []
+        episode_lengths = []
+    else:
+        agent.load(loadpath)
+        running_rewards = load_rewards(loadpath+'running_rewards.pkl')
+        episode_rewards = load_rewards(loadpath+'episode_rewards.pkl')
+        episode_lengths = load_rewards(loadpath+'episode_lengths.pkl')
+        running_reward = running_rewards[-1]
+
     with tqdm(range(max_episodes)) as t:
         for i in t:
             episode_reward, episode_length = agent.train_step(env)
@@ -137,46 +155,82 @@ def runAC(savepath='./saved_models/'):
             t.set_description(f'Episode {i}')
             t.set_postfix(episode_reward=episode_reward, running_reward=running_reward)
             
-            if i % 500 == 0:
+            if (i+1) % 100 == 0 : # or i == 0 
                 agent.save(savepath)
-                save_rewards(running_rewards, 'running_rewards.pkl')
-                save_rewards(episode_rewards, 'episode_rewards.pkl')
-                save_rewards(episode_length, 'episode_lengths.pkl')
+                save_rewards(running_rewards, savepath+'running_rewards_lr{}_g{}_b{}.pkl'.format(params['lr'], params['gamma'], params['beta']))
+                save_rewards(episode_rewards, savepath+'episode_rewards_lr{}_g{}_b{}.pkl'.format(params['lr'], params['gamma'], params['beta']))
+                save_rewards(episode_lengths, savepath+'episode_lengths_lr{}_g{}_b{}.pkl'.format(params['lr'], params['gamma'], params['beta']))
+    return
 
-def testAC(loadpath='./saved_models/'):
+def testAC(loadpath='./saved_models/', params=None):
     config = Config()
     env = gym_super_mario_bros.make("SuperMarioBros-1-1-v0")
     env = make_env(env)
 
     max_episodes = 5000
+    max_steps_per_episode = 1000
+
+    if params is None:
+        lr = 1e-4
+        gamma = 0.99
+        beta = 0.01
+    else:
+        lr = params['lr']
+        gamma = params['gamma']
+        beta = params['beta']
 
     state_shape = env.observation_space.shape
     output_size = env.action_space.n
-    model = ActorCriticNet(state_shape[0], config.batch_size, output_size)
-    agent = ActorCriticAgent(model, config.learning_rate, device=config.device)
+    model = ActorCriticNet(state_shape[0], output_size)
+    agent = ActorCriticAgent(model, lr=lr, gamma=gamma, beta=beta,
+                    max_steps=max_steps_per_episode, device=config.device)
+    agent.load(loadpath)
 
-    max_reward = 0
-    running_rewards = []
-    episode_rewards = []
+    if loadpath is None:
+        running_reward = 0
+        running_rewards = []
+        episode_rewards = []
+        episode_lengths = []
+    else:
+        agent.load(loadpath)
+        running_rewards = load_rewards(loadpath+'running_rewards_lr{}_g{}_b{}.pkl'.format(params['lr'], params['gamma'], params['beta']))
+        episode_rewards = load_rewards(loadpath+'episode_rewards_lr{}_g{}_b{}.pkl'.format(params['lr'], params['gamma'], params['beta']))
+        episode_lengths = load_rewards(loadpath+'episode_lengths_lr{}_g{}_b{}.pkl'.format(params['lr'], params['gamma'], params['beta']))
+        running_reward = running_rewards[-1]
+
     with tqdm(range(max_episodes)) as t:
         for i in t:
-            state = env.reset()
-            done = False
-            episode_reward = 0
-            while not done:
-                env.render()
-                action = agent.act(state)
-                state, reward, done, info = env.step(action)
-                episode_reward += reward
-                if done:
-                    break
-            if episode_reward > max_reward:
-                max_reward = episode_reward
-    print("Max reward is:", max_reward)
-    plot_rewards(episode_rewards, 'a2c_test_rewards.png')
-    return
+            states, actions, log_probs, values, rewards, last_Qval, num_steps = agent.run_episode(env, render=True)
+            episode_reward = int(sum(rewards))
 
+            t.set_description(f'Episode {i}')
+            t.set_postfix(episode_reward=episode_reward, running_reward=running_reward)
+
+def multiple_tests(prepath="/content/drive/MyDrive/8980-project-files/"):
+    for lr in [1e-5, 5e-5, 1e-4, 5e-4, 1e-3, 5e-3, 1e-2]:
+        for gamma in [0.99, 0.9]:
+            for beta in [1e-3, 5e-3, 1e-2, 1e-1]:
+                params = {
+                    'lr': lr,
+                    'gamma': gamma,
+                    'beta': beta
+                }
+
+                savepath = prepath+"A2C_trial_multiple_tests/"#.format(params['lr'], params['gamma'], params['beta'])
+
+                if not os.path.exists(savepath):
+                    os.makedirs(savepath)
+
+                runAC(savepath = savepath)
 
 if __name__ == "__main__":
-    runAC(savepath='./saved_models/actor_critic_test/')
-    # testAC(loadpath='./saved_models/actor_critic_test/')
+    params = {
+        'lr': 1e-5,
+        'gamma': 0.95,
+        'beta': 0.01
+    }
+    # runAC(savepath='./saved_models/actor_critic_test/', params=params)
+    # multiple_tests("/content/drive/MyDrive/8980-project-files/")
+
+    loadpath = './saved_models/A2C_trial_lr1e-05_g0.95_b0.01/'
+    testAC(loadpath=loadpath, params=params)
